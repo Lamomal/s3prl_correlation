@@ -46,6 +46,12 @@ class UtteranceLevel(nn.Module):
         latest_dim = input_dim
         self.pre_net = get_downstream_model(latest_dim, latest_dim, pre_net) if isinstance(pre_net, dict) else None
         self.pooling = eval(pooling)(input_dim=latest_dim, activation=activation)
+        ##> new
+        post_net_conf = post_net.get(post_net['select'], {})
+        if 'input_dim' in post_net_conf:
+            latest_dim = post_net_conf['input_dim']
+            post_net[post_net['select']].pop('input_dim')
+        ##>
         self.post_net = get_downstream_model(latest_dim, output_dim, post_net)
 
     def forward(self, hidden_state, features_len=None):
@@ -75,6 +81,35 @@ class MeanPooling(nn.Module):
             agg_vec_list.append(agg_vec)
 
         return torch.stack(agg_vec_list), torch.ones(len(feature_BxTxH)).long()
+
+
+class CorrelationPooling(nn.Module):
+    '''
+    Correlation type of pooling: https://arxiv.org/abs/2104.02571
+    '''
+
+    def __init__(self, **kwargs):
+        super(CorrelationPooling, self).__init__()
+
+    def forward(self, feature_BxTxH, features_len, **kwargs):
+        ''' 
+        Arguments
+            feature_BxTxH - [BxTxH]   Acoustic feature with shape 
+            features_len  - [B] of feature length
+        '''
+        # note: do not include diagonal
+        dshift = 1  # the diagonal to consider (0:includes diag, 1:from 1 over diag)
+        agg_vec_list = []
+        for i in range(len(feature_BxTxH)):
+            x = feature_BxTxH[i][:features_len[i]] # (T', H)
+            # normalization
+            x = torch.div((x - torch.mean(x, dim=0, keepdim=True)), torch.std(x, dim=0, keepdim=True))
+            corr = torch.div(torch.einsum('jk,jl->kl', x, x), x.shape[0]) # (H, H)
+            # select upper triangular matrix, vectorize
+            corr = corr[torch.triu_indices(corr.shape[0], corr.shape[1], offset=dshift).unbind()]
+            agg_vec_list.append(corr)
+
+        return torch.stack(agg_vec_list), torch.ones(len(feature_BxTxH)).long() # (B,feat_dim), (B,)
 
 
 class AttentivePooling(nn.Module):

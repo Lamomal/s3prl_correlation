@@ -36,4 +36,8 @@ downstream_expert:
     projector_dim: 256
     select: UtteranceLevel
     UtteranceLevel:
-      pooling: MeanPooling
+      pooling: CorrelationPooling
+      post_net:
+        select: FrameLevel
+        FrameLevel:
+            input_dim: 32640
