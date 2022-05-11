@@ -82,6 +82,26 @@ class MeanPooling(nn.Module):
 
         return torch.stack(agg_vec_list), torch.ones(len(feature_BxTxH)).long()
 
+class MeanStdPooling(nn.Module):
+
+    def __init__(self, **kwargs):
+        super(MeanStdPooling, self).__init__()
+
+    def forward(self, feature_BxTxH, features_len, **kwargs):
+        ''' 
+        Arguments
+            feature_BxTxH - [BxTxH]   Acoustic feature with shape 
+            features_len  - [B] of feature length
+        '''
+        agg_vec_list = []
+        for i in range(len(feature_BxTxH)):
+            mean_vec = torch.mean(feature_BxTxH[i][:features_len[i]], dim=0) # (T', H) -> (H,)
+            std_vec  = torch.std(feature_BxTxH[i][:features_len[i]], dim=0)  # (H,)
+            agg_vec  = torch.cat((mean_vec, std_vec), dim=0) # (2H,)
+            agg_vec_list.append(agg_vec)
+
+        return torch.stack(agg_vec_list), torch.ones(len(feature_BxTxH)).long()
+
 
 class CorrelationPooling(nn.Module):
     '''

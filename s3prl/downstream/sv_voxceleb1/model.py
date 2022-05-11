@@ -29,6 +29,8 @@ def decide_utter_input_dim(agg_module_name, input_dim, agg_dim):
         utter_input_dim = agg_dim*2		
     elif agg_module_name == "MP":		
         utter_input_dim = agg_dim		
+    elif agg_module_name == "CP":
+        utter_input_dim = int(agg_dim*(agg_dim-1) / 2)
     else:		
         utter_input_dim = input_dim		
     return utter_input_dim
@@ -170,6 +172,41 @@ class AttentivePooling(nn.Module):
         return utter_rep, att_w
 
 
+class CP(nn.Module):
+    '''
+    Correlation type of pooling: https://arxiv.org/abs/2104.02571
+    '''
+
+    def __init__(self, out_dim, input_dim, **kwargs):
+        super(CP, self).__init__()
+        # input_dim, out_dim not used
+    
+    def forward(self, feature_BxTxH, att_mask_BxT):
+        ''' 
+        Arguments
+            feature - [BxTxH]   Acoustic feature with shape 
+            att_mask- [BxT]     Attention Mask logits
+        '''
+        # note: do not include diagonal
+        dshift = 1  # the diagonal to consider (0:includes diag, 1:from 1 over diag)
+        agg_vec_list = []
+        for i in range(len(feature_BxTxH)):
+            if torch.nonzero(att_mask_BxT[i] < 0, as_tuple=False).size(0) == 0:
+                length = len(feature_BxTxH[i])
+            else:
+                length = torch.nonzero(att_mask_BxT[i] < 0, as_tuple=False)[0] + 1
+
+            x = feature_BxTxH[i][:length] # (T', H)
+            # normalization
+            x = torch.div((x - torch.mean(x, dim=0, keepdim=True)), torch.std(x, dim=0, keepdim=True)+1e-9)
+            corr = torch.div(torch.einsum('jk,jl->kl', x, x), x.shape[0]) # (H, H)
+            # select upper triangular matrix, vectorize
+            corr = corr[torch.triu_indices(corr.shape[0], corr.shape[1], offset=dshift).unbind()]
+            agg_vec_list.append(corr)
+
+        return torch.stack(agg_vec_list) # (B,feat_dim)
+
+
 # General Interface
 class Model(nn.Module):
     def __init__(self, input_dim, agg_dim, agg_module_name, module_name, utterance_module_name, hparams):
@@ -182,7 +219,7 @@ class Model(nn.Module):
 
         # agg_module: 
         # current support:
-        # [ "AP" (Attentive Pooling), "MP" (Mean Pooling), "SP" (Statistic Pooling), "SAP" (Statistic Attentive Pooling) ]
+        # [ "AP" (Attentive Pooling), "MP" (Mean Pooling), "SP" (Statistic Pooling), "SAP" (Statistic Attentive Pooling), "CP" (Correlation Pooling) ]
         agg_module_config = {"out_dim": input_dim, "input_dim": agg_dim}
         self.agg_method = eval(agg_module_name)(**agg_module_config)
 
