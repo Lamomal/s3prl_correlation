@@ -177,9 +177,12 @@ class CP(nn.Module):
     Correlation type of pooling: https://arxiv.org/abs/2104.02571
     '''
 
-    def __init__(self, out_dim, input_dim, **kwargs):
+    def __init__(self, out_dim, input_dim, p_drop=0, **kwargs):
         super(CP, self).__init__()
         # input_dim, out_dim not used
+        self.drop_f = p_drop != 0
+        if self.drop_f:
+            self.dropout = nn.Dropout2d(p=p_drop)
     
     def forward(self, feature_BxTxH, att_mask_BxT):
         ''' 
@@ -187,6 +190,13 @@ class CP(nn.Module):
             feature - [BxTxH]   Acoustic feature with shape 
             att_mask- [BxT]     Attention Mask logits
         '''
+        if self.drop_f:
+            feature_BxHxT = torch.permute(feature_BxTxH, (0,2,1)) # [BxHxT]
+            feature_BxHxT = torch.unsqueeze(feature_BxHxT, dim=-1) # [BxHxTx1]
+            feature_BxHxT = self.dropout(feature_BxHxT)
+            feature_BxHxT = torch.squeeze(feature_BxHxT, dim=-1) # [BxHxT]
+            feature_BxTxH = torch.permute(feature_BxHxT, (0,2,1)) # [BxTxH]
+
         # note: do not include diagonal
         dshift = 1  # the diagonal to consider (0:includes diag, 1:from 1 over diag)
         agg_vec_list = []
@@ -209,7 +219,7 @@ class CP(nn.Module):
 
 # General Interface
 class Model(nn.Module):
-    def __init__(self, input_dim, agg_dim, agg_module_name, module_name, utterance_module_name, hparams):
+    def __init__(self, input_dim, agg_dim, agg_module_name, module_name, utterance_module_name, hparams, agg_hparams=None):
         super(Model, self).__init__()
         
         # support for XVector(standard architecture), Identity (do nothing)
@@ -221,6 +231,8 @@ class Model(nn.Module):
         # current support:
         # [ "AP" (Attentive Pooling), "MP" (Mean Pooling), "SP" (Statistic Pooling), "SAP" (Statistic Attentive Pooling), "CP" (Correlation Pooling) ]
         agg_module_config = {"out_dim": input_dim, "input_dim": agg_dim}
+        if agg_hparams is not None:
+            agg_module_config.update(agg_hparams)
         self.agg_method = eval(agg_module_name)(**agg_module_config)
 
         utterance_input_dim = decide_utter_input_dim(agg_module_name=agg_module_name, agg_dim=agg_dim, input_dim=input_dim)

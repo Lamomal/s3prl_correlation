@@ -98,6 +98,11 @@ class DownstreamExpert(nn.Module):
             "hparams": self.modelrc["module_config"][self.modelrc['module']],
             "utterance_module_name": self.modelrc["utter_module"]
         }
+        if self.modelrc['agg_module'] in self.modelrc['module_config']:
+            # for parametric pooling
+            ModelConfig.update(
+                {'agg_hparams': self.modelrc['module_config'][self.modelrc['agg_module']]},
+            )
         # downstream model extractor include aggregation module
         self.model = Model(**ModelConfig)
 
