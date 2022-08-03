@@ -40,18 +40,19 @@ class UtteranceLevel(nn.Module):
         activation='ReLU',
         pre_net=None,
         post_net={'select': 'FrameLevel'},
+        pooling_params={},
         **kwargs
     ):
         super().__init__()
         latest_dim = input_dim
         self.pre_net = get_downstream_model(latest_dim, latest_dim, pre_net) if isinstance(pre_net, dict) else None
-        self.pooling = eval(pooling)(input_dim=latest_dim, activation=activation)
-        ##> new
+        self.pooling = eval(pooling)(input_dim=latest_dim, activation=activation, **pooling_params)
+
         post_net_conf = post_net.get(post_net['select'], {})
         if 'input_dim' in post_net_conf:
             latest_dim = post_net_conf['input_dim']
             post_net[post_net['select']].pop('input_dim')
-        ##>
+
         self.post_net = get_downstream_model(latest_dim, output_dim, post_net)
 
     def forward(self, hidden_state, features_len=None):
@@ -108,8 +109,11 @@ class CorrelationPooling(nn.Module):
     Correlation type of pooling: https://arxiv.org/abs/2104.02571
     '''
 
-    def __init__(self, **kwargs):
+    def __init__(self, p_drop=0, **kwargs):
         super(CorrelationPooling, self).__init__()
+        self.drop_f = p_drop != 0
+        if self.drop_f:
+            self.dropout = nn.Dropout2d(p=p_drop)
 
     def forward(self, feature_BxTxH, features_len, **kwargs):
         ''' 
@@ -117,13 +121,20 @@ class CorrelationPooling(nn.Module):
             feature_BxTxH - [BxTxH]   Acoustic feature with shape 
             features_len  - [B] of feature length
         '''
+        if self.drop_f:
+            feature_BxHxT = torch.permute(feature_BxTxH, (0,2,1)) # [BxHxT]
+            feature_BxHxT = torch.unsqueeze(feature_BxHxT, dim=-1) # [BxHxTx1]
+            feature_BxHxT = self.dropout(feature_BxHxT)
+            feature_BxHxT = torch.squeeze(feature_BxHxT, dim=-1) # [BxHxT]
+            feature_BxTxH = torch.permute(feature_BxHxT, (0,2,1)) # [BxTxH]
+
         # note: do not include diagonal
         dshift = 1  # the diagonal to consider (0:includes diag, 1:from 1 over diag)
         agg_vec_list = []
         for i in range(len(feature_BxTxH)):
             x = feature_BxTxH[i][:features_len[i]] # (T', H)
             # normalization
-            x = torch.div((x - torch.mean(x, dim=0, keepdim=True)), torch.std(x, dim=0, keepdim=True))
+            x = torch.div((x - torch.mean(x, dim=0, keepdim=True)), torch.std(x, dim=0, keepdim=True)+1e-9)
             corr = torch.div(torch.einsum('jk,jl->kl', x, x), x.shape[0]) # (H, H)
             # select upper triangular matrix, vectorize
             corr = corr[torch.triu_indices(corr.shape[0], corr.shape[1], offset=dshift).unbind()]
