@@ -12,11 +12,6 @@ import numpy as np
 from argparse import Namespace
 from torch.distributed import is_initialized, get_world_size
 
-import socket
-if socket.gethostname() != 'pcmikolov.fit.vutbr.cz':
-    from safe_gpu import safe_gpu
-    gpu_owner = safe_gpu.GPUOwner()
-
 from s3prl import hub
 from s3prl import downstream
 from s3prl.downstream.runner import Runner
